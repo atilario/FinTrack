@@ -17,7 +17,7 @@ import {
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
 import { toCents, splitInstallments, convertCurrency } from "@/lib/money";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, or, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { seedDemoData } from "@/db/seed";
 
@@ -615,3 +615,177 @@ export async function wipeUserData() {
   revalidatePath("/");
   return { success: true };
 }
+
+// --- DEV PROFILE TESTING ACTIONS ---
+
+export async function simulateOverBudgetScenario() {
+  const user = await requireUser();
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  const nowIso = now.toISOString();
+
+  // Find or create Alimentação category
+  const cat = await db
+    .select()
+    .from(categories)
+    .where(
+      and(
+        eq(categories.name, "Alimentação"),
+        or(eq(categories.userId, user.id), isNull(categories.userId))
+      )
+    )
+    .get();
+
+  if (cat) {
+    // Set budget to R$ 800,00
+    await setBudget({
+      categoryId: cat.id,
+      amount: "800",
+      month,
+      year,
+      alertThreshold: 80,
+    });
+
+    // Inject an expense of R$ 950,00
+    await db.insert(transactions).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      type: "expense",
+      amountCents: toCents(950),
+      originalAmountCents: toCents(950),
+      originalCurrency: user.primaryCurrency || "BRL",
+      date: now.toISOString().split("T")[0],
+      description: "Supermercado Gourmet (Simulação Dev de Estouro)",
+      categoryId: cat.id,
+      paymentMethod: "pix",
+      transactionNature: "variable",
+      isPaid: true,
+      tags: "dev,teste,alerta",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    // Add alert notification
+    await db.insert(notifications).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      title: "⚠️ Orçamento Ultrapassado!",
+      message: "O orçamento de Alimentação atingiu 118% do limite mensal estipulado.",
+      type: "budget_alert",
+      isRead: false,
+      link: "/planning",
+      createdAt: nowIso,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/planning");
+  revalidatePath("/notifications");
+  return { success: true };
+}
+
+export async function simulateHighCreditCardUsage() {
+  const user = await requireUser();
+  const card = await db
+    .select()
+    .from(creditCards)
+    .where(eq(creditCards.userId, user.id))
+    .get();
+
+  if (card) {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    // Inject purchase near limit
+    const chargeCents = Math.round(card.limitCents * 0.92);
+
+    await db.insert(transactions).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      type: "expense",
+      amountCents: chargeCents,
+      originalAmountCents: chargeCents,
+      originalCurrency: user.primaryCurrency || "BRL",
+      date: now.toISOString().split("T")[0],
+      description: "Passagens Internacionais (Simulação Dev 92% Limite)",
+      creditCardId: card.id,
+      paymentMethod: "credit",
+      transactionNature: "variable",
+      isPaid: false,
+      tags: "dev,cartao,limite",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+
+    await db.insert(notifications).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      title: "💳 Cartão Próximo do Limite (92%)",
+      message: `O cartão ${card.name} atingiu 92% do limite de crédito disponível.`,
+      type: "statement_closing",
+      isRead: false,
+      link: "/cards",
+      createdAt: nowIso,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/cards");
+  revalidatePath("/notifications");
+  return { success: true };
+}
+
+export async function simulateBatchRandomTransactions(count: number = 10) {
+  const user = await requireUser();
+  const userAccounts = await db.select().from(accounts).where(eq(accounts.userId, user.id));
+  const userCats = await db.select().from(categories);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const nowIso = now.toISOString();
+
+  const samples = [
+    { desc: "Cafeteria Especial", amount: 24.5, type: "expense" as const },
+    { desc: "Uber Viagem", amount: 38.2, type: "expense" as const },
+    { desc: "Farmácia Droga Raia", amount: 89.0, type: "expense" as const },
+    { desc: "Rendimento CDB", amount: 142.3, type: "income" as const },
+    { desc: "Padaria Artesanal", amount: 45.0, type: "expense" as const },
+    { desc: "Gasolina Posto Shell", amount: 180.0, type: "expense" as const },
+    { desc: "Reembolso Despesa Trabalho", amount: 250.0, type: "income" as const },
+    { desc: "Livro Técnico Amazon", amount: 79.9, type: "expense" as const },
+    { desc: "Jantar Japonês", amount: 165.0, type: "expense" as const },
+    { desc: "Freelance Bugfix", amount: 650.0, type: "income" as const },
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const sample = samples[i % samples.length];
+    const day = String(Math.floor(Math.random() * 25) + 1).padStart(2, "0");
+    const acc = userAccounts[i % userAccounts.length];
+    const cat = userCats[i % userCats.length];
+
+    await db.insert(transactions).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      type: sample.type,
+      amountCents: toCents(sample.amount),
+      originalAmountCents: toCents(sample.amount),
+      originalCurrency: user.primaryCurrency || "BRL",
+      date: `${year}-${month}-${day}`,
+      description: `${sample.desc} #${i + 1}`,
+      categoryId: cat?.id || null,
+      accountId: acc?.id || null,
+      paymentMethod: sample.type === "income" ? "pix" : "debit",
+      transactionNature: "variable",
+      isPaid: true,
+      tags: "dev-batch",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/transactions");
+  revalidatePath("/reports");
+  return { success: true };
+}
+

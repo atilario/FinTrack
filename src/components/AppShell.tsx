@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Navigation } from "./Navigation";
 import { QuickTransactionModal } from "./QuickTransactionModal";
+import { DevToolbar } from "./DevToolbar";
 
 interface AppShellProps {
   user: {
@@ -45,6 +46,8 @@ export function AppShell({
         categories={categories}
         primaryCurrency={user.primaryCurrency}
       />
+
+      <DevToolbar user={user} />
     </div>
   );
 }

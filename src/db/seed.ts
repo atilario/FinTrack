@@ -577,6 +577,49 @@ async function main() {
     console.log("Seeded complete realistic financial data for demo user!");
   }
 
+  // Create Dev Profile for Feature Testing
+  const devEmail = "dev@fintrack.app";
+  const existingDev = await db.select().from(users).where(eq(users.email, devEmail)).get();
+
+  let devUserId = existingDev?.id;
+  if (!existingDev) {
+    devUserId = crypto.randomUUID();
+    const devPasswordHash = await hashPassword("dev123");
+
+    await db.insert(users).values({
+      id: devUserId,
+      name: "Desenvolvedor FinTrack",
+      email: devEmail,
+      passwordHash: devPasswordHash,
+      primaryCurrency: "BRL",
+      country: "BR",
+      hasCompletedOnboarding: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(userPreferences).values({
+      id: crypto.randomUUID(),
+      userId: devUserId,
+      theme: "dark",
+      language: "pt-BR",
+      firstDayOfMonth: 1,
+      firstDayOfWeek: 0,
+      dateFormat: "DD/MM/YYYY",
+      notifyBillsDue: true,
+      notifyBudgets: true,
+      notifyGoals: true,
+      updatedAt: now,
+    });
+
+    console.log(`Created dev user: ${devEmail} (password: dev123)`);
+  }
+
+  if (devUserId) {
+    await seedDemoData(devUserId);
+    console.log("Seeded testing environment for developer profile!");
+  }
+
   console.log("Database seed completed successfully! 🚀");
   process.exit(0);
 }

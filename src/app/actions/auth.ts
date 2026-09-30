@@ -144,6 +144,57 @@ export async function loginDemoUser() {
   return { success: true, redirect: "/" };
 }
 
+export async function loginDevUser() {
+  const email = "dev@fintrack.app";
+  let user = await db.select().from(users).where(eq(users.email, email)).get();
+
+  if (!user) {
+    const userId = crypto.randomUUID();
+    const passwordHash = await hashPassword("dev123");
+    const now = new Date().toISOString();
+
+    await db.insert(users).values({
+      id: userId,
+      name: "Desenvolvedor FinTrack",
+      email,
+      passwordHash,
+      primaryCurrency: "BRL",
+      country: "BR",
+      hasCompletedOnboarding: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(userPreferences).values({
+      id: crypto.randomUUID(),
+      userId,
+      theme: "dark",
+      language: "pt-BR",
+      firstDayOfMonth: 1,
+      firstDayOfWeek: 0,
+      dateFormat: "DD/MM/YYYY",
+      notifyBillsDue: true,
+      notifyBudgets: true,
+      notifyGoals: true,
+      updatedAt: now,
+    });
+
+    await seedDemoData(userId);
+    user = await db.select().from(users).where(eq(users.id, userId)).get();
+  }
+
+  if (user) {
+    const token = await signSessionToken({
+      userId: user.id,
+      email: user.email,
+      name: user.name,
+    });
+    await setSessionCookie(token);
+  }
+
+  return { success: true, redirect: "/" };
+}
+
 export async function logoutUser() {
   await clearSessionCookie();
   redirect("/login");
