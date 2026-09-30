@@ -361,6 +361,54 @@ export async function createCreditCard(data: {
   return { success: true, id };
 }
 
+export async function updateCreditCard(
+  id: string,
+  data: {
+    name: string;
+    bank: string;
+    brand: string;
+    lastFourDigits?: string;
+    limit: number | string;
+    closingDay: number;
+    dueDay: number;
+    color?: string;
+  }
+) {
+  const user = await requireUser();
+  const limitCents = toCents(data.limit);
+  const now = new Date().toISOString();
+
+  await db
+    .update(creditCards)
+    .set({
+      name: data.name,
+      bank: data.bank,
+      brand: data.brand,
+      lastFourDigits: data.lastFourDigits || "",
+      limitCents,
+      closingDay: data.closingDay,
+      dueDay: data.dueDay,
+      color: data.color || "#6366F1",
+      updatedAt: now,
+    })
+    .where(and(eq(creditCards.id, id), eq(creditCards.userId, user.id)));
+
+  revalidatePath("/");
+  revalidatePath("/cards");
+  return { success: true };
+}
+
+export async function deleteCreditCard(id: string) {
+  const user = await requireUser();
+  await db
+    .delete(creditCards)
+    .where(and(eq(creditCards.id, id), eq(creditCards.userId, user.id)));
+
+  revalidatePath("/");
+  revalidatePath("/cards");
+  return { success: true };
+}
+
 // Pay Credit Card Bill (Clears invoice without double-counting expenses)
 export async function payCreditCardBill(data: {
   creditCardId: string;

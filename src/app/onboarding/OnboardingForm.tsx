@@ -34,6 +34,9 @@ export function OnboardingForm({ user }: OnboardingFormProps) {
   // Optional card
   const [addCard, setAddCard] = useState(true);
   const [cardName, setCardName] = useState("Cartão de Crédito");
+  const [cardBank, setCardBank] = useState("Nubank");
+  const [cardBrand, setCardBrand] = useState("mastercard");
+  const [cardLastFour, setCardLastFour] = useState("");
   const [cardLimit, setCardLimit] = useState("3000");
   const [cardDueDay, setCardDueDay] = useState(10);
   const [cardClosingDay, setCardClosingDay] = useState(3);
@@ -59,8 +62,9 @@ export function OnboardingForm({ user }: OnboardingFormProps) {
       if (addCard && cardName) {
         await createCreditCard({
           name: cardName,
-          bank: accountInstitution,
-          brand: "mastercard",
+          bank: cardBank || accountInstitution || "Nubank",
+          brand: cardBrand || "mastercard",
+          lastFourDigits: cardLastFour,
           limit: cardLimit || "0",
           dueDay: cardDueDay,
           closingDay: cardClosingDay,
@@ -232,24 +236,103 @@ export function OnboardingForm({ user }: OnboardingFormProps) {
                 </label>
 
                 {addCard && (
-                  <div className="grid grid-cols-2 gap-2.5 pt-2">
-                    <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Nome</label>
-                      <input
-                        type="text"
-                        value={cardName}
-                        onChange={(e) => setCardName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
+                  <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Nome do Cartão</label>
+                        <input
+                          type="text"
+                          value={cardName}
+                          onChange={(e) => setCardName(e.target.value)}
+                          placeholder="Ex: Cartão Principal"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Banco / Emissor</label>
+                        <select
+                          value={cardBank}
+                          onChange={(e) => setCardBank(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          <option value="Nubank">Nubank</option>
+                          <option value="Itaú">Itaú</option>
+                          <option value="Bradesco">Bradesco</option>
+                          <option value="Santander">Santander</option>
+                          <option value="Banco do Brasil">Banco do Brasil</option>
+                          <option value="Caixa Econômica">Caixa Econômica</option>
+                          <option value="Inter">Inter</option>
+                          <option value="C6 Bank">C6 Bank</option>
+                          <option value="BTG Pactual">BTG Pactual</option>
+                          <option value="XP Investimentos">XP Investimentos</option>
+                          <option value="Mercado Pago">Mercado Pago</option>
+                          <option value="Outro">Outro</option>
+                        </select>
+                      </div>
                     </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Bandeira</label>
+                        <select
+                          value={cardBrand}
+                          onChange={(e) => setCardBrand(e.target.value)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        >
+                          <option value="mastercard">Mastercard</option>
+                          <option value="visa">Visa</option>
+                          <option value="elo">Elo</option>
+                          <option value="amex">American Express</option>
+                          <option value="hipercard">Hipercard</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Últimos 4 Dígitos</label>
+                        <input
+                          type="text"
+                          maxLength={4}
+                          value={cardLastFour}
+                          onChange={(e) => setCardLastFour(e.target.value.replace(/\D/g, ""))}
+                          placeholder="Ex: 4829"
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-mono tracking-wider focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
                     <div>
-                      <label className="block text-[11px] text-slate-400 mb-1">Limite Total (R$)</label>
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Limite Total (R$)</label>
                       <input
                         type="text"
                         value={cardLimit}
                         onChange={(e) => setCardLimit(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        placeholder="Ex: 3000"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs font-semibold focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                       />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Dia Fechamento</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={cardClosingDay}
+                          onChange={(e) => setCardClosingDay(parseInt(e.target.value) || 1)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">Dia Vencimento</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={31}
+                          value={cardDueDay}
+                          onChange={(e) => setCardDueDay(parseInt(e.target.value) || 1)}
+                          className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}
