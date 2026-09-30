@@ -53,6 +53,7 @@ interface DashboardViewProps {
   investments: any[];
   recurring: any[];
   goals: any[];
+  debts?: any[];
 }
 
 export function DashboardView({
@@ -64,6 +65,7 @@ export function DashboardView({
   investments,
   recurring,
   goals,
+  debts = [],
 }: DashboardViewProps) {
   const { success, error } = useToast();
   const [loadingSeed, setLoadingSeed] = useState(false);
@@ -105,8 +107,9 @@ export function DashboardView({
       transactions: periodTransactions,
       investments,
       creditCards: cards,
+      debts,
     });
-  }, [accounts, periodTransactions, investments, cards]);
+  }, [accounts, periodTransactions, investments, cards, debts]);
 
   // Overall account balances (all time up to today)
   const allTimeSummary = useMemo(() => {
@@ -115,8 +118,9 @@ export function DashboardView({
       transactions,
       investments,
       creditCards: cards,
+      debts,
     });
-  }, [accounts, transactions, investments, cards]);
+  }, [accounts, transactions, investments, cards, debts]);
 
   // Category breakdown for Pie Chart
   const categoryChartData = useMemo(() => {
@@ -345,10 +349,50 @@ export function DashboardView({
             <span className="text-xl sm:text-2xl font-black tracking-tight">
               {formatMoney(allTimeSummary.netWorthCents, user.primaryCurrency)}
             </span>
-            <span className="block text-[11px] text-emerald-200 mt-0.5">
-              Contas + Investimentos
+            <span className="block text-[11px] text-emerald-100 mt-0.5 truncate" title={`Ativos: ${formatMoney(allTimeSummary.totalAssetsCents, user.primaryCurrency)} | Obrigações: ${formatMoney(allTimeSummary.totalLiabilitiesCents, user.primaryCurrency)}`}>
+              Ativos − Faturas e Dívidas
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* --- BANNER DE SEPARAÇÃO: CRÉDITO DISPONÍVEL VS DINHEIRO REAL (REQUISITOS 20 & 21) --- */}
+      <div className="p-4 rounded-2xl glass-panel border border-slate-200/80 dark:border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center shrink-0">
+            <CreditCard className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-slate-800 dark:text-slate-200">
+                Crédito Disponível nos Cartões:
+              </span>
+              <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                {formatMoney(allTimeSummary.totalAvailableCreditCents, user.primaryCurrency)}
+              </span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 font-medium">
+                Limite, não é dinheiro
+              </span>
+            </div>
+            <span className="text-[11px] text-slate-400">
+              Faturas em aberto: {formatMoney(allTimeSummary.totalOpenInvoicesCents, user.primaryCurrency)} • Dívidas ativas: {formatMoney(allTimeSummary.totalDebtsCents, user.primaryCurrency)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <Link
+            href="/cards"
+            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium transition-colors"
+          >
+            Ver Faturas
+          </Link>
+          <Link
+            href="/planning"
+            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors"
+          >
+            Planejamento
+          </Link>
         </div>
       </div>
 

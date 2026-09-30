@@ -13,6 +13,7 @@ import {
   financialGoals,
   investments,
   notifications,
+  debts,
   users,
 } from "@/db/schema";
 import { requireUser } from "@/lib/auth";
@@ -834,6 +835,133 @@ export async function simulateBatchRandomTransactions(count: number = 10) {
   revalidatePath("/");
   revalidatePath("/transactions");
   revalidatePath("/reports");
+  return { success: true };
+}
+
+// --- DEBTS & LOANS (DÍVIDAS E FINANCIAMENTOS) ---
+
+export async function createDebt(data: {
+  creditor: string;
+  description?: string;
+  type?: string;
+  totalAmount: number | string;
+  remainingAmount?: number | string;
+  interestRate?: string;
+  totalInstallments?: number;
+  paidInstallments?: number;
+  installmentAmount?: number | string;
+  nextDueDate?: string;
+  startDate?: string;
+  endDate?: string;
+  accountId?: string;
+  notes?: string;
+}) {
+  const user = await requireUser();
+  const totalAmountCents = toCents(data.totalAmount);
+  const remainingAmountCents = data.remainingAmount
+    ? toCents(data.remainingAmount)
+    : totalAmountCents;
+  const totalInst = Number(data.totalInstallments) || 1;
+  const installmentAmountCents = data.installmentAmount
+    ? toCents(data.installmentAmount)
+    : Math.round(totalAmountCents / totalInst);
+  const now = new Date().toISOString();
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  await db.insert(debts).values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    creditor: data.creditor,
+    description: data.description || null,
+    type: data.type || "loan",
+    totalAmountCents,
+    remainingAmountCents,
+    interestRate: data.interestRate || null,
+    totalInstallments: totalInst,
+    paidInstallments: Number(data.paidInstallments) || 0,
+    installmentAmountCents,
+    nextDueDate: data.nextDueDate || null,
+    startDate: data.startDate || todayStr,
+    endDate: data.endDate || null,
+    accountId: data.accountId || null,
+    status: remainingAmountCents <= 0 ? "paid" : "active",
+    notes: data.notes || null,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  revalidatePath("/");
+  revalidatePath("/planning");
+  return { success: true };
+}
+
+export async function payDebtInstallment(data: {
+  debtId: string;
+  amount: number | string;
+  accountId?: string;
+  date?: string;
+}) {
+  const user = await requireUser();
+  const paymentCents = toCents(data.amount);
+  const now = new Date().toISOString();
+  const todayStr = data.date || new Date().toISOString().split("T")[0];
+
+  const debt = await db
+    .select()
+    .from(debts)
+    .where(and(eq(debts.id, data.debtId), eq(debts.userId, user.id)))
+    .get();
+
+  if (!debt) throw new Error("Dívida não encontrada");
+
+  const newRemainingCents = Math.max(0, debt.remainingAmountCents - paymentCents);
+  const newPaidInstallments = debt.paidInstallments + 1;
+  const newStatus = newRemainingCents <= 0 ? "paid" : "active";
+
+  await db
+    .update(debts)
+    .set({
+      remainingAmountCents: newRemainingCents,
+      paidInstallments: newPaidInstallments,
+      status: newStatus,
+      updatedAt: now,
+    })
+    .where(eq(debts.id, debt.id));
+
+  // If paid through an account, record an expense transaction
+  if (data.accountId) {
+    await db.insert(transactions).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      type: "expense",
+      amountCents: paymentCents,
+      originalAmountCents: paymentCents,
+      originalCurrency: user.primaryCurrency || "BRL",
+      date: todayStr,
+      description: `Parcela ${newPaidInstallments}/${debt.totalInstallments} — ${debt.creditor}`,
+      accountId: data.accountId,
+      paymentMethod: "boleto",
+      transactionNature: "fixed",
+      isPaid: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/planning");
+  revalidatePath("/transactions");
+  return { success: true };
+}
+
+export async function deleteDebt(debtId: string) {
+  const user = await requireUser();
+  await db
+    .delete(debts)
+    .where(and(eq(debts.id, debtId), eq(debts.userId, user.id)));
+
+  revalidatePath("/");
+  revalidatePath("/planning");
   return { success: true };
 }
 

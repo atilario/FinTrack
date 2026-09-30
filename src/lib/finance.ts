@@ -45,6 +45,23 @@ export interface CreditCardItem {
   limitCents: number;
   closingDay: number;
   dueDay: number;
+  currency?: string;
+  bank?: string;
+  brand?: string;
+}
+
+export interface DebtItem {
+  id: string;
+  creditor: string;
+  description?: string | null;
+  totalAmountCents: number;
+  remainingAmountCents: number;
+  interestRate?: string | null;
+  totalInstallments: number;
+  paidInstallments: number;
+  installmentAmountCents: number;
+  nextDueDate?: string | null;
+  status: string;
 }
 
 /**
@@ -101,11 +118,12 @@ export function calculateFinancialSummary(params: {
   accounts: AccountItem[];
   transactions: TransactionItem[];
   investments: InvestmentItem[];
-  creditCards: CreditCardItem[];
+  creditCards?: CreditCardItem[];
+  debts?: DebtItem[];
 }) {
-  const { accounts, transactions, investments } = params;
+  const { accounts, transactions, investments, creditCards = [], debts = [] } = params;
 
-  // 1. Account balances
+  // 1. Account balances (Liquid money in bank accounts)
   const accountBalances: Record<string, number> = {};
   let totalAvailableBalanceCents = 0;
 
@@ -154,11 +172,40 @@ export function calculateFinancialSummary(params: {
       ? ((totalInvestmentValueCents - totalInvestedCents) / totalInvestedCents) * 100
       : 0;
 
-  // 4. Net worth
-  const netWorthCents = totalAvailableBalanceCents + totalInvestmentValueCents;
+  // 4. Credit Card Invoices & Available Credit
+  let totalOpenInvoicesCents = 0;
+  let totalCreditLimitCents = 0;
+  let totalAvailableCreditCents = 0;
+
+  for (const card of creditCards) {
+    const usage = calculateCreditCardUsage(card, transactions);
+    totalOpenInvoicesCents += usage.usedLimitCents;
+    totalCreditLimitCents += card.limitCents;
+    totalAvailableCreditCents += usage.availableLimitCents;
+  }
+
+  // 5. Active Debts
+  let totalDebtsCents = 0;
+  for (const debt of debts) {
+    if (debt.status === "active" || debt.status === "overdue") {
+      totalDebtsCents += debt.remainingAmountCents;
+    }
+  }
+
+  // 6. Realistic Net Worth (Patrimônio Líquido = Ativos - Passivos/Obrigações)
+  const totalAssetsCents = totalAvailableBalanceCents + totalInvestmentValueCents;
+  const totalLiabilitiesCents = totalOpenInvoicesCents + totalDebtsCents;
+  const netWorthCents = totalAssetsCents - totalLiabilitiesCents;
 
   return {
-    totalAvailableBalanceCents,
+    totalAvailableBalanceCents, // Dinheiro Real em Conta
+    totalCreditLimitCents,      // Limite Total dos Cartões
+    totalAvailableCreditCents,  // Crédito Disponível (NÃO é dinheiro!)
+    totalOpenInvoicesCents,     // Faturas em Aberto a Pagar
+    totalDebtsCents,            // Dívidas e Empréstimos Ativos
+    totalAssetsCents,           // Ativos (Contas + Investimentos)
+    totalLiabilitiesCents,      // Obrigações (Faturas + Dívidas)
+    netWorthCents,              // Patrimônio Líquido Real
     totalIncomeCents,
     totalExpenseCents,
     fixedExpenseCents,
@@ -167,7 +214,6 @@ export function calculateFinancialSummary(params: {
     totalInvestmentValueCents,
     investmentProfitCents,
     investmentYieldPercent,
-    netWorthCents,
     accountBalances,
   };
 }
@@ -266,6 +312,105 @@ export function calculateForecast(params: {
       installmentCents: installmentAmount,
       netCashflowCents: netCashflow,
       projectedBalanceCents: projectedBalance,
+    });
+  }
+
+  return projections;
+}
+
+/**
+ * Computes which statement cycle a credit card purchase belongs to:
+ * - If day of purchase <= closingDay => current month statement
+ * - If day of purchase > closingDay => next month statement!
+ */
+export function determineCardStatementPeriod(
+  purchaseDateStr: string,
+  closingDay: number,
+  dueDay: number
+) {
+  const parts = purchaseDateStr.split("-");
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10); // 1 to 12
+  const day = parseInt(parts[2], 10);
+
+  let statementMonth = month;
+  let statementYear = year;
+
+  // After closing day, purchase rolls into the next statement!
+  if (day > closingDay) {
+    statementMonth += 1;
+    if (statementMonth > 12) {
+      statementMonth = 1;
+      statementYear += 1;
+    }
+  }
+
+  const monthNames = [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+  ];
+
+  return {
+    statementMonth,
+    statementYear,
+    monthLabel: `${monthNames[statementMonth - 1]} de ${statementYear}`,
+    closingDateStr: `${statementYear}-${String(statementMonth).padStart(2, "0")}-${String(closingDay).padStart(2, "0")}`,
+    dueDateStr: `${statementYear}-${String(statementMonth).padStart(2, "0")}-${String(dueDay).padStart(2, "0")}`,
+  };
+}
+
+/**
+ * Projects upcoming statements for a credit card for the next N months.
+ * Aggregates regular purchases and installment slices.
+ */
+export function calculateCardStatementsProjection(
+  card: CreditCardItem,
+  transactions: TransactionItem[],
+  monthsCount = 6
+) {
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1; // 1 to 12
+  const currentYear = now.getFullYear();
+
+  const monthNames = [
+    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez"
+  ];
+
+  const projections = [];
+
+  for (let i = 0; i < monthsCount; i++) {
+    let targetMonth = currentMonth + i;
+    let targetYear = currentYear;
+    while (targetMonth > 12) {
+      targetMonth -= 12;
+      targetYear += 1;
+    }
+
+    let purchasesTotalCents = 0;
+    const purchases: TransactionItem[] = [];
+
+    for (const tx of transactions) {
+      if (tx.creditCardId === card.id && tx.type === "expense" && !tx.isCardBillPayment) {
+        const period = determineCardStatementPeriod(tx.date, card.closingDay, card.dueDay);
+        if (period.statementMonth === targetMonth && period.statementYear === targetYear) {
+          purchasesTotalCents += tx.amountCents;
+          purchases.push(tx);
+        }
+      }
+    }
+
+    projections.push({
+      month: targetMonth,
+      year: targetYear,
+      monthLabel: `${monthNames[targetMonth - 1]}/${targetYear.toString().slice(-2)}`,
+      fullLabel: `${monthNames[targetMonth - 1]} ${targetYear}`,
+      isCurrentStatement: i === 0,
+      totalAmountCents: purchasesTotalCents,
+      purchasesCount: purchases.length,
+      purchases,
+      closingDate: `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(card.closingDay).padStart(2, "0")}`,
+      dueDate: `${targetYear}-${String(targetMonth).padStart(2, "0")}-${String(card.dueDay).padStart(2, "0")}`,
     });
   }
 

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { CreditCard, Plus, CheckCircle, AlertCircle, X, Check, Edit2, Trash2, ShieldCheck } from "lucide-react";
+import { useState, useMemo } from "react";
+import { CreditCard, Plus, CheckCircle, AlertCircle, X, Check, Edit2, Trash2, ShieldCheck, Eye, Calendar, TrendingUp, Clock, ArrowUpRight, Receipt } from "lucide-react";
 import { formatMoney, fromCents, toCents } from "@/lib/money";
-import { calculateCreditCardUsage } from "@/lib/finance";
+import { calculateCreditCardUsage, calculateCardStatementsProjection } from "@/lib/finance";
 import { createCreditCard, updateCreditCard, deleteCreditCard, payCreditCardBill } from "@/app/actions/finance";
 import { useToast } from "./ToastProvider";
 
@@ -72,6 +72,8 @@ export function CardsManager({
   const [openEditModal, setOpenEditModal] = useState(false);
   const [openPayModal, setOpenPayModal] = useState(false);
   const [selectedCardForPay, setSelectedCardForPay] = useState<any>(null);
+  const [selectedCardForDetails, setSelectedCardForDetails] = useState<any>(null);
+  const [detailsTab, setDetailsTab] = useState<"current" | "projection">("current");
   const [editingCardId, setEditingCardId] = useState<string | null>(null);
 
   // Form states
@@ -89,6 +91,13 @@ export function CardsManager({
   // Pay invoice form
   const [payAccountId, setPayAccountId] = useState(accounts[0]?.id || "");
   const [payAmount, setPayAmount] = useState("");
+
+  const cardProjections = useMemo(() => {
+    if (!selectedCardForDetails) return [];
+    return calculateCardStatementsProjection(selectedCardForDetails, transactions, 6);
+  }, [selectedCardForDetails, transactions]);
+
+  const currentCycle = cardProjections.find((p) => p.isCurrentStatement) || cardProjections[0];
 
   const resetForm = () => {
     setName("");
@@ -519,7 +528,18 @@ export function CardsManager({
                       {usage.usagePercentage}% do limite utilizado
                     </span>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => {
+                          setSelectedCardForDetails(card);
+                          setDetailsTab("current");
+                        }}
+                        className="py-1.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-colors flex items-center gap-1.5"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-indigo-500" />
+                        Ver Fatura
+                      </button>
+
                       <button
                         onClick={() => handleOpenEditModal(card)}
                         className="py-1.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition-colors flex items-center gap-1.5"
@@ -686,6 +706,196 @@ export function CardsManager({
                 Confirmar Pagamento da Fatura
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALHES DA FATURA E PROJEÇÃO FUTURA */}
+      {selectedCardForDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-2xl rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-base font-bold text-slate-900 dark:text-white">
+                    {selectedCardForDetails.name}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
+                    {selectedCardForDetails.bank || "Banco"}
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">
+                    •••• {selectedCardForDetails.lastFourDigits || "0000"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Melhor dia de compra (fechamento): <strong>dia {selectedCardForDetails.closingDay || 25}</strong> • Vencimento: <strong>dia {selectedCardForDetails.dueDay || 5}</strong>
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedCardForDetails(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tab switch inside modal */}
+            <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+              <button
+                onClick={() => setDetailsTab("current")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                  detailsTab === "current"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <Receipt className="w-3.5 h-3.5" />
+                Fatura Vigente
+              </button>
+              <button
+                onClick={() => setDetailsTab("projection")}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                  detailsTab === "projection"
+                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400"
+                    : "text-slate-500 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                Projeção Futura (6 Meses)
+              </button>
+            </div>
+
+            {/* TAB 1: FATURA VIGENTE */}
+            {detailsTab === "current" && (
+              <div className="space-y-4">
+                {currentCycle ? (
+                  <>
+                    <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                          Ciclo Vigente ({currentCycle.fullLabel})
+                        </span>
+                        <div className="text-xl font-bold text-slate-900 dark:text-white">
+                          {formatMoney(currentCycle.totalAmountCents, selectedCardForDetails.currency)}
+                        </div>
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Fechamento: {currentCycle.closingDate} • Vencimento: {currentCycle.dueDate}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSelectedCardForPay(selectedCardForDetails);
+                          setPayAmount(fromCents(currentCycle.totalAmountCents).toString());
+                          setOpenPayModal(true);
+                        }}
+                        disabled={currentCycle.totalAmountCents <= 0}
+                        className="py-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/20"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        Pagar Esta Fatura
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Lançamentos alocados neste ciclo ({currentCycle.purchases.length})
+                      </h4>
+
+                      {currentCycle.purchases.length === 0 ? (
+                        <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
+                          Nenhuma compra ou parcela lançada para esta fatura até o momento.
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                          {currentCycle.purchases.map((item: any) => (
+                            <div
+                              key={item.id}
+                              className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                            >
+                              <div className="space-y-0.5">
+                                <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                  <span>{item.description}</span>
+                                  {item.installmentNumber && item.totalInstallments && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 font-bold">
+                                      Parcela {item.installmentNumber}/{item.totalInstallments}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-slate-400">
+                                  {item.date}
+                                </span>
+                              </div>
+                              <div className="font-bold text-slate-900 dark:text-white">
+                                {formatMoney(item.amountCents, selectedCardForDetails.currency)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    Nenhum ciclo identificado para este cartão.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: PROJEÇÃO FUTURA */}
+            {detailsTab === "projection" && (
+              <div className="space-y-4">
+                <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 text-xs text-indigo-700 dark:text-indigo-300 flex items-start gap-2">
+                  <Clock className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <strong>Projeção de Faturas Futuras:</strong> Veja como suas compras já realizadas e parcelas programadas impactam os seus próximos 6 meses.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {cardProjections.map((proj) => (
+                    <div
+                      key={`${proj.year}-${proj.month}`}
+                      className={`p-4 rounded-2xl border transition-all ${
+                        proj.isCurrentStatement
+                          ? "bg-slate-50 dark:bg-slate-800/80 border-emerald-500/50 shadow-sm"
+                          : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          {proj.fullLabel}
+                        </span>
+                        {proj.isCurrentStatement && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold">
+                            Atual
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="text-lg font-bold text-slate-900 dark:text-white mb-1">
+                        {formatMoney(proj.totalAmountCents, selectedCardForDetails.currency)}
+                      </div>
+
+                      <div className="text-[10px] text-slate-400 space-y-0.5 mb-2">
+                        <div>Vence em: {proj.dueDate}</div>
+                        <div>Fechamento: {proj.closingDate}</div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
+                        <span>{proj.purchases.length} lançamento(s)</span>
+                        {proj.purchases.some((i: any) => i.installmentNumber) && (
+                          <span className="text-indigo-500 font-medium">Contém parcelas</span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

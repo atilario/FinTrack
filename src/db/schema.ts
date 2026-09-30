@@ -70,13 +70,20 @@ export const creditCards = sqliteTable("credit_cards", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   bank: text("bank").notNull().default("Outro"),
-  brand: text("brand").notNull().default("visa"), // 'visa' | 'mastercard' | 'elo' | 'amex' | 'other'
+  brand: text("brand").notNull().default("visa"), // 'visa' | 'mastercard' | 'elo' | 'amex' | 'hipercard' | 'other'
+  type: text("type").notNull().default("credit"), // 'credit' | 'debit' | 'multiple'
+  category: text("category").notNull().default("international"), // 'national' | 'international'
+  modality: text("modality").notNull().default("physical"), // 'physical' | 'virtual'
+  holderName: text("holder_name"),
+  expirationDate: text("expiration_date"), // MM/YY
   lastFourDigits: text("last_four_digits"),
   limitCents: integer("limit_cents").notNull().default(0),
   closingDay: integer("closing_day").notNull().default(1),
   dueDay: integer("due_day").notNull().default(10),
   color: text("color").notNull().default("#6366F1"),
   currency: text("currency").notNull().default("BRL"),
+  status: text("status").notNull().default("active"), // 'active' | 'blocked' | 'cancelled'
+  notes: text("notes"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (table) => [
@@ -244,6 +251,32 @@ export const notifications = sqliteTable("notifications", {
   createdAt: text("created_at").notNull(),
 }, (table) => [
   index("notifications_user_idx").on(table.userId, table.isRead),
+]);
+
+// 14. Debts & Loans (Dívidas, Financiamentos e Empréstimos)
+export const debts = sqliteTable("debts", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  creditor: text("creditor").notNull(),
+  description: text("description"),
+  type: text("type").notNull().default("loan"), // 'loan' | 'financing' | 'personal' | 'overdraft' | 'other'
+  totalAmountCents: integer("total_amount_cents").notNull(),
+  remainingAmountCents: integer("remaining_amount_cents").notNull(),
+  interestRate: text("interest_rate"),
+  totalInstallments: integer("total_installments").notNull().default(1),
+  paidInstallments: integer("paid_installments").notNull().default(0),
+  installmentAmountCents: integer("installment_amount_cents").notNull().default(0),
+  nextDueDate: text("next_due_date"),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date"),
+  accountId: text("account_id").references(() => accounts.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("active"), // 'active' | 'paid' | 'overdue' | 'renegotiated'
+  notes: text("notes"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  index("debts_user_idx").on(table.userId),
+  index("debts_status_idx").on(table.status),
 ]);
 
 // Relations

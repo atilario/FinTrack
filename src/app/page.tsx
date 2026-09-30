@@ -9,6 +9,7 @@ import {
   investments,
   recurringTransactions,
   financialGoals,
+  debts,
 } from "@/db/schema";
 import { eq, or, isNull, desc } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
@@ -30,6 +31,7 @@ export default async function HomePage() {
     userInvestments,
     userRecurring,
     userGoals,
+    userDebts,
   ] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.userId, user.id)),
     db.select().from(creditCards).where(eq(creditCards.userId, user.id)),
@@ -45,6 +47,7 @@ export default async function HomePage() {
     db.select().from(investments).where(eq(investments.userId, user.id)),
     db.select().from(recurringTransactions).where(eq(recurringTransactions.userId, user.id)),
     db.select().from(financialGoals).where(eq(financialGoals.userId, user.id)),
+    db.select().from(debts).where(eq(debts.userId, user.id)),
   ]);
 
   return (
@@ -63,6 +66,7 @@ export default async function HomePage() {
         investments={userInvestments}
         recurring={userRecurring}
         goals={userGoals}
+        debts={userDebts}
       />
     </AppShell>
   );

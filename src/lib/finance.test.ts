@@ -12,6 +12,7 @@ import {
   calculateFinancialSummary,
   calculateBudgetProgress,
   calculateCreditCardUsage,
+  determineCardStatementPeriod,
   AccountItem,
   TransactionItem,
 } from "./finance";
@@ -231,5 +232,94 @@ describe("Financial Domain Rules - Budgets and Credit Cards", () => {
     assert.strictEqual(usage.usedLimitCents, 214000);
     assert.strictEqual(usage.availableLimitCents, 286000); // 5000 - 2140 = 2860
     assert.strictEqual(usage.usagePercentage, 43);
+  });
+
+  it("determines correct statement cycle based on closing day rule (before vs after cut)", () => {
+    // Card with closing day 02, due day 09
+    const closingDay = 2;
+    const dueDay = 9;
+
+    // Purchase on day 01 (before closing day) -> belongs to current month (October)
+    const cycle1 = determineCardStatementPeriod("2026-10-01", closingDay, dueDay);
+    assert.strictEqual(cycle1.statementMonth, 10);
+    assert.strictEqual(cycle1.statementYear, 2026);
+
+    // Purchase on day 03 (after closing day) -> rolls to next month (November)
+    const cycle2 = determineCardStatementPeriod("2026-10-03", closingDay, dueDay);
+    assert.strictEqual(cycle2.statementMonth, 11);
+    assert.strictEqual(cycle2.statementYear, 2026);
+  });
+
+  it("calculates realistic net worth correctly deducting open card invoices and active debts", () => {
+    const acc = {
+      id: "acc-main",
+      name: "Conta Corrente",
+      type: "checking",
+      institution: "Nubank",
+      currency: "BRL",
+      initialBalanceCents: 1000000, // R$ 10.000,00
+    };
+
+    const inv = {
+      id: "inv-1",
+      name: "Tesouro Selic",
+      type: "fixed_income",
+      totalInvestedCents: 500000, // R$ 5.000,00
+      currentValueCents: 550000,  // R$ 5.500,00
+    };
+
+    const card = {
+      id: "card-1",
+      name: "Nubank",
+      limitCents: 800000, // R$ 8.000,00 limit (NOT cash!)
+      closingDay: 25,
+      dueDay: 5,
+    };
+
+    const unpaidCardTx: TransactionItem = {
+      id: "tx-unpaid-card",
+      type: "expense",
+      amountCents: 200000, // R$ 2.000,00 invoice
+      originalAmountCents: 200000,
+      originalCurrency: "BRL",
+      date: "2026-09-15",
+      description: "Supermercado",
+      creditCardId: "card-1",
+      paymentMethod: "credit",
+      transactionNature: "variable",
+      isPaid: false,
+    };
+
+    const debt = {
+      id: "debt-1",
+      creditor: "Banco do Brasil",
+      totalAmountCents: 600000,
+      remainingAmountCents: 350000, // R$ 3.500,00 remaining debt
+      totalInstallments: 12,
+      paidInstallments: 5,
+      installmentAmountCents: 50000,
+      status: "active",
+    };
+
+    const summary = calculateFinancialSummary({
+      accounts: [acc],
+      transactions: [unpaidCardTx],
+      investments: [inv],
+      creditCards: [card],
+      debts: [debt],
+    });
+
+    // Total Assets = R$ 10.000 (Account) + R$ 5.500 (Investment) = R$ 15.500 (1550000 cents)
+    assert.strictEqual(summary.totalAssetsCents, 1550000);
+
+    // Total Liabilities = R$ 2.000 (Open invoice) + R$ 3.500 (Debt) = R$ 5.500 (550000 cents)
+    assert.strictEqual(summary.totalLiabilitiesCents, 550000);
+
+    // Net Worth = R$ 15.500 - R$ 5.500 = R$ 10.000 (1000000 cents)
+    assert.strictEqual(summary.netWorthCents, 1000000);
+
+    // Available Credit is reported separately and NEVER counted as cash
+    assert.strictEqual(summary.totalAvailableCreditCents, 600000); // 8000 - 2000 = 6000
+    assert.strictEqual(summary.totalAvailableBalanceCents, 1000000); // exactly 10.000
   });
 });

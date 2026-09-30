@@ -10,6 +10,7 @@ import {
   recurringTransactions,
   installmentPlans,
   transactions,
+  debts,
 } from "@/db/schema";
 import { eq, or, isNull, desc } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
@@ -28,6 +29,7 @@ export default async function PlanningPage() {
     userRecurring,
     userInstallmentPlans,
     userTransactions,
+    userDebts,
   ] = await Promise.all([
     db.select().from(accounts).where(eq(accounts.userId, user.id)),
     db.select().from(creditCards).where(eq(creditCards.userId, user.id)),
@@ -44,6 +46,7 @@ export default async function PlanningPage() {
       .from(transactions)
       .where(eq(transactions.userId, user.id))
       .orderBy(desc(transactions.date)),
+    db.select().from(debts).where(eq(debts.userId, user.id)),
   ]);
 
   return (
@@ -63,6 +66,7 @@ export default async function PlanningPage() {
         recurring={userRecurring}
         installmentPlans={userInstallmentPlans}
         transactions={userTransactions}
+        debts={userDebts}
       />
     </AppShell>
   );
