@@ -541,7 +541,7 @@ async function main() {
 
   if (!existing) {
     demoUserId = crypto.randomUUID();
-    const passwordHash = await hashPassword("fintrack123");
+    const passwordHash = await hashPassword("demo123");
 
     await db.insert(users).values({
       id: demoUserId,
@@ -569,7 +569,7 @@ async function main() {
       updatedAt: now,
     });
 
-    console.log(`Created demo user: ${email} (password: fintrack123)`);
+    console.log(`Created demo user: ${email} (password: demo123)`);
   }
 
   if (demoUserId) {
