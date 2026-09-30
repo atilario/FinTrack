@@ -64,6 +64,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
     localStorage.setItem("fintrack_theme", newTheme);
+
+    const root = document.documentElement;
+    let isDark = false;
+    if (newTheme === "system") {
+      isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    } else {
+      isDark = newTheme === "dark";
+    }
+
+    setResolvedTheme(isDark ? "dark" : "light");
+    if (isDark) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
   };
 
   return (
