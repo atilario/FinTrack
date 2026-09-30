@@ -103,6 +103,8 @@ export function PlanningManager({
   const [instTotal, setInstTotal] = useState("");
   const [instCount, setInstCount] = useState(10);
   const [instCardId, setInstCardId] = useState(cards[0]?.id || "");
+  const [instStartDate, setInstStartDate] = useState(new Date().toISOString().split("T")[0]);
+  const [instPaidCount, setInstPaidCount] = useState(0);
 
   // Debt form states
   const [debtCreditor, setDebtCreditor] = useState("");
@@ -151,8 +153,12 @@ export function PlanningManager({
       });
   }, [budgets, transactions, categories, currentMonth, currentYear]);
 
-  // Forecast calculation
-  const forecastProjections = useMemo(() => {
+  // Real Forecast calculation
+  const forecastMetrics = useMemo(() => {
+    // 1. Real Liquid Balance across accounts
+    const currentBalanceCents = accounts.reduce((acc, a) => acc + (a.balanceCents || 0), 0);
+
+    // 2. Real Recurring Income & Fixed Expense
     let monthlyIncome = 0;
     let monthlyFixedExpense = 0;
 
@@ -162,37 +168,99 @@ export function PlanningManager({
       if (r.type === "expense") monthlyFixedExpense += r.amountCents;
     }
 
-    // Estimate variable expense from previous 30 days
+    // If no recurring income, estimate from average monthly income in transactions
+    if (monthlyIncome === 0) {
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const sixtyStr = sixtyDaysAgo.toISOString().split("T")[0];
+      let recentIncome = 0;
+      for (const t of transactions) {
+        if (t.type === "income" && t.date >= sixtyStr) {
+          recentIncome += t.amountCents;
+        }
+      }
+      monthlyIncome = Math.round(recentIncome / 2);
+    }
+
+    // 3. Real Average Variable Expense (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const thirtyStr = thirtyDaysAgo.toISOString().split("T")[0];
 
     let recentVariable = 0;
     for (const t of transactions) {
-      if (t.type === "expense" && t.transactionNature === "variable" && t.date >= thirtyStr) {
+      if (
+        t.type === "expense" &&
+        !t.isCardBillPayment &&
+        t.transactionNature !== "fixed" &&
+        t.date >= thirtyStr
+      ) {
         recentVariable += t.amountCents;
       }
     }
 
-    // Installments grouped by upcoming months
-    const pendingInstallments = [
-      { monthLabel: "Mês 1", amountCents: 35000 },
-      { monthLabel: "Mês 2", amountCents: 35000 },
-      { monthLabel: "Mês 3", amountCents: 35000 },
-      { monthLabel: "Mês 4", amountCents: 35000 },
-      { monthLabel: "Mês 5", amountCents: 35000 },
-      { monthLabel: "Mês 6", amountCents: 35000 },
-    ];
+    // 4. Real Installments & Active Debts projected by upcoming month
+    const pendingInstallments: { monthLabel: string; amountCents: number }[] = [];
+    const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
-    return calculateForecast({
-      currentBalanceCents: 1550000,
-      monthlyRecurringIncomeCents: monthlyIncome || 850000,
-      monthlyRecurringExpenseCents: monthlyFixedExpense || 218580,
-      averageVariableExpenseCents: recentVariable || 120000,
+    for (let i = 1; i <= 6; i++) {
+      let targetMonth = currentMonth + i;
+      let targetYear = currentYear;
+      while (targetMonth > 12) {
+        targetMonth -= 12;
+        targetYear += 1;
+      }
+
+      const monthPrefix = `${targetYear}-${String(targetMonth).padStart(2, "0")}`;
+      const label = `${monthNames[targetMonth - 1]}/${targetYear.toString().slice(-2)}`;
+
+      let monthInstallmentTotal = 0;
+
+      for (const t of transactions) {
+        if (
+          t.type === "expense" &&
+          !t.isPaid &&
+          !t.isCardBillPayment &&
+          t.date.startsWith(monthPrefix)
+        ) {
+          monthInstallmentTotal += t.amountCents;
+        }
+      }
+
+      for (const d of debts) {
+        if (d.status === "active" && d.remainingAmountCents > 0) {
+          const remainingInst = (d.totalInstallments || 1) - (d.paidInstallments || 0);
+          if (remainingInst >= i) {
+            monthInstallmentTotal += d.installmentAmountCents || 0;
+          }
+        }
+      }
+
+      pendingInstallments.push({
+        monthLabel: label,
+        amountCents: monthInstallmentTotal,
+      });
+    }
+
+    const projections = calculateForecast({
+      currentBalanceCents,
+      monthlyRecurringIncomeCents: monthlyIncome,
+      monthlyRecurringExpenseCents: monthlyFixedExpense,
+      averageVariableExpenseCents: recentVariable,
       pendingInstallmentsByMonth: pendingInstallments,
       monthsAhead: 6,
     });
-  }, [recurring, transactions]);
+
+    return {
+      currentBalanceCents,
+      monthlyIncome,
+      monthlyFixedExpense,
+      recentVariable,
+      projections,
+    };
+  }, [accounts, recurring, transactions, debts, currentMonth, currentYear]);
+
+  const forecastProjections = forecastMetrics.projections;
 
   // Debts calculations
   const activeDebts = useMemo(() => debts.filter((d) => d.status === "active" && d.remainingAmountCents > 0), [debts]);
@@ -269,16 +337,19 @@ export function PlanningManager({
         description: instDesc,
         totalAmount: instTotal,
         totalInstallments: instCount,
+        paidInstallmentsCount: instPaidCount,
         creditCardId: instCardId || undefined,
-        startDate: new Date().toISOString().split("T")[0],
+        startDate: instStartDate || new Date().toISOString().split("T")[0],
       });
       success(`Parcelamento em ${instCount}x registrado!`);
       setOpenInstallmentModal(false);
       setInstDesc("");
       setInstTotal("");
+      setInstStartDate(new Date().toISOString().split("T")[0]);
+      setInstPaidCount(0);
       window.location.reload();
-    } catch {
-      error("Erro ao criar parcelamento.");
+    } catch (err: any) {
+      error(err?.message || "Erro ao criar parcelamento.");
     }
   };
 
@@ -315,8 +386,9 @@ export function PlanningManager({
       setDebtDueDate("");
       setDebtNotes("");
       window.location.reload();
-    } catch {
-      error("Erro ao cadastrar dívida.");
+    } catch (err: any) {
+      console.error(err);
+      error(err?.message || "Erro ao cadastrar dívida.");
     }
   };
 
@@ -334,8 +406,9 @@ export function PlanningManager({
       setOpenPayDebtModal(false);
       setSelectedDebtForPay(null);
       window.location.reload();
-    } catch {
-      error("Erro ao registrar pagamento de parcela.");
+    } catch (err: any) {
+      console.error(err);
+      error(err?.message || "Erro ao registrar pagamento de parcela.");
     }
   };
 
@@ -345,8 +418,9 @@ export function PlanningManager({
       await deleteDebt(debt.id);
       success("Dívida excluída com sucesso.");
       window.location.reload();
-    } catch {
-      error("Erro ao excluir dívida.");
+    } catch (err: any) {
+      console.error(err);
+      error(err?.message || "Erro ao excluir dívida.");
     }
   };
 
@@ -706,8 +780,51 @@ export function PlanningManager({
       {/* --- TAB 5: PREVISÃO FINANCEIRA (FORECAST) --- */}
       {tab === "forecast" && (
         <div className="space-y-4 animate-fade-in">
-          <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
-            <strong>Estimativa Inteligente:</strong> As previsões abaixo projetam o saldo dos próximos 6 meses com base nas suas receitas recorrentes, despesas fixas cadastradas, parcelas ativas e média de gastos variáveis.
+          {/* Transparent Metric Row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-2xl glass-panel space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Saldo Atual Líquido
+              </span>
+              <span className="text-base font-bold text-slate-900 dark:text-white">
+                {formatMoney(forecastMetrics.currentBalanceCents, user.primaryCurrency)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Soma de suas contas</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl glass-panel space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Receitas Previstas/mês
+              </span>
+              <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
+                +{formatMoney(forecastMetrics.monthlyIncome, user.primaryCurrency)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Recorrentes e média</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl glass-panel space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Gastos Fixos/mês
+              </span>
+              <span className="text-base font-bold text-rose-600 dark:text-rose-400">
+                −{formatMoney(forecastMetrics.monthlyFixedExpense, user.primaryCurrency)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Despesas recorrentes</span>
+            </div>
+
+            <div className="p-3.5 rounded-2xl glass-panel space-y-0.5">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                Média Variável
+              </span>
+              <span className="text-base font-bold text-slate-700 dark:text-slate-300">
+                −{formatMoney(forecastMetrics.recentVariable, user.primaryCurrency)}
+              </span>
+              <span className="text-[10px] text-slate-400 block">Últimos 30 dias</span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-500/20 text-xs text-indigo-800 dark:text-indigo-300">
+            <strong>Estimativa Realista:</strong> Projeção calculada a partir dos seus saldos bancários reais, recorrências cadastradas e parcelamentos com vencimento futuro.
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -740,6 +857,12 @@ export function PlanningManager({
                       −{formatMoney(p.projectedExpenseCents, user.primaryCurrency)}
                     </span>
                   </div>
+                  {p.installmentCents > 0 && (
+                    <div className="flex justify-between text-[11px] text-indigo-600 dark:text-indigo-400">
+                      <span>Parcelas & Dívidas no mês:</span>
+                      <span>−{formatMoney(p.installmentCents, user.primaryCurrency)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="border-t border-slate-100 dark:border-slate-800 pt-2 flex items-center justify-between text-xs">
@@ -1038,6 +1161,35 @@ export function PlanningManager({
                     max={60}
                     value={instCount}
                     onChange={(e) => setInstCount(parseInt(e.target.value) || 2)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Data da 1ª Parcela / Compra
+                  </label>
+                  <input
+                    type="date"
+                    value={instStartDate}
+                    onChange={(e) => setInstStartDate(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Parcelas Já Pagas (passadas)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={instCount - 1}
+                    value={instPaidCount}
+                    onChange={(e) => setInstPaidCount(Math.min(instCount - 1, Math.max(0, parseInt(e.target.value) || 0)))}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                 </div>

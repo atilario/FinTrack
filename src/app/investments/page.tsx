@@ -28,7 +28,7 @@ export default async function InvestmentsPage() {
       cards={userCards}
       categories={allCategories}
     >
-      <InvestmentsManager user={user} investments={userInvestments} />
+      <InvestmentsManager user={user} investments={userInvestments} accounts={userAccounts} />
     </AppShell>
   );
 }

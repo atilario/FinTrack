@@ -217,6 +217,7 @@ export async function createInstallmentPlan(data: {
   description: string;
   totalAmount: number | string;
   totalInstallments: number;
+  paidInstallmentsCount?: number;
   categoryId?: string;
   creditCardId?: string;
   accountId?: string;
@@ -228,6 +229,8 @@ export async function createInstallmentPlan(data: {
   const totalInstallments = Math.max(1, Math.min(60, data.totalInstallments));
   const planId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const todayStr = now.split("T")[0];
+  const paidCount = Math.max(0, Math.min(totalInstallments, Number(data.paidInstallmentsCount) || 0));
 
   await db.insert(installmentPlans).values({
     id: planId,
@@ -245,12 +248,17 @@ export async function createInstallmentPlan(data: {
 
   // Generate split installments across months
   const parts = splitInstallments(totalAmountCents, totalInstallments);
-  const start = new Date(data.startDate);
+  const [sYear, sMonth, sDay] = data.startDate.split("-").map(Number);
 
   for (let i = 0; i < totalInstallments; i++) {
-    const installmentDate = new Date(start);
-    installmentDate.setMonth(start.getMonth() + i);
+    const installmentDate = new Date(sYear, (sMonth - 1) + i, sDay || 1);
     const dateStr = installmentDate.toISOString().split("T")[0];
+
+    // Marked as already paid if:
+    // 1. Explicitly inside paidCount
+    // 2. OR installment date is in the past for non-credit card installments
+    // 3. OR first installment for non-credit card
+    const isAlreadyPaid = (paidCount > 0 && i < paidCount) || (!data.creditCardId && (i === 0 || dateStr < todayStr));
 
     await db.insert(transactions).values({
       id: crypto.randomUUID(),
@@ -268,7 +276,7 @@ export async function createInstallmentPlan(data: {
       installmentNumber: i + 1,
       paymentMethod: data.creditCardId ? "credit" : "other",
       transactionNature: "installment",
-      isPaid: i === 0 && !data.creditCardId, // card purchases are marked paid when bill is cleared
+      isPaid: isAlreadyPaid,
       createdAt: now,
       updatedAt: now,
     });
@@ -277,6 +285,7 @@ export async function createInstallmentPlan(data: {
   revalidatePath("/");
   revalidatePath("/transactions");
   revalidatePath("/planning");
+  revalidatePath("/cards");
   return { success: true, planId };
 }
 
@@ -633,6 +642,133 @@ export async function createInvestment(data: {
     createdAt: now,
     updatedAt: now,
   });
+
+  revalidatePath("/");
+  revalidatePath("/investments");
+  return { success: true };
+}
+
+export async function updateInvestment(
+  id: string,
+  data: {
+    name: string;
+    type: string;
+    institution: string;
+    totalInvested: number | string;
+    currentValue: number | string;
+    notes?: string;
+  }
+) {
+  const user = await requireUser();
+  const now = new Date().toISOString();
+
+  await db
+    .update(investments)
+    .set({
+      name: data.name,
+      type: data.type,
+      institution: data.institution || "Outro",
+      totalInvestedCents: toCents(data.totalInvested),
+      currentValueCents: toCents(data.currentValue),
+      notes: data.notes || null,
+      updatedAt: now,
+    })
+    .where(and(eq(investments.id, id), eq(investments.userId, user.id)));
+
+  revalidatePath("/");
+  revalidatePath("/investments");
+  return { success: true };
+}
+
+export async function contributeInvestment(data: {
+  investmentId: string;
+  contributionAmount: number | string;
+  newCurrentValue?: number | string;
+  accountId?: string;
+  date?: string;
+}) {
+  const user = await requireUser();
+  const contributionCents = toCents(data.contributionAmount);
+  if (contributionCents <= 0) throw new Error("Valor do aporte deve ser positivo");
+
+  const inv = await db
+    .select()
+    .from(investments)
+    .where(and(eq(investments.id, data.investmentId), eq(investments.userId, user.id)))
+    .get();
+
+  if (!inv) throw new Error("Investimento não encontrado");
+
+  const now = new Date().toISOString();
+  const todayStr = data.date || now.split("T")[0];
+
+  const newTotalInvestedCents = inv.totalInvestedCents + contributionCents;
+  const newCurrentValueCents = data.newCurrentValue
+    ? toCents(data.newCurrentValue)
+    : inv.currentValueCents + contributionCents;
+
+  await db
+    .update(investments)
+    .set({
+      totalInvestedCents: newTotalInvestedCents,
+      currentValueCents: newCurrentValueCents,
+      updatedAt: now,
+    })
+    .where(eq(investments.id, inv.id));
+
+  // If debited from an account, record expense transaction
+  if (data.accountId) {
+    await db.insert(transactions).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      type: "expense",
+      amountCents: contributionCents,
+      originalAmountCents: contributionCents,
+      originalCurrency: user.primaryCurrency || "BRL",
+      date: todayStr,
+      description: `Aporte em Investimento: ${inv.name}`,
+      accountId: data.accountId,
+      paymentMethod: "pix",
+      transactionNature: "variable",
+      isPaid: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  revalidatePath("/");
+  revalidatePath("/investments");
+  revalidatePath("/accounts");
+  revalidatePath("/transactions");
+  return { success: true };
+}
+
+export async function updateInvestmentValue(data: {
+  investmentId: string;
+  currentValue: number | string;
+}) {
+  const user = await requireUser();
+  const currentValueCents = toCents(data.currentValue);
+  const now = new Date().toISOString();
+
+  await db
+    .update(investments)
+    .set({
+      currentValueCents,
+      updatedAt: now,
+    })
+    .where(and(eq(investments.id, data.investmentId), eq(investments.userId, user.id)));
+
+  revalidatePath("/");
+  revalidatePath("/investments");
+  return { success: true };
+}
+
+export async function deleteInvestment(id: string) {
+  const user = await requireUser();
+  await db
+    .delete(investments)
+    .where(and(eq(investments.id, id), eq(investments.userId, user.id)));
 
   revalidatePath("/");
   revalidatePath("/investments");
