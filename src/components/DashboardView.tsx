@@ -53,7 +53,6 @@ interface DashboardViewProps {
   investments: any[];
   recurring: any[];
   goals: any[];
-  onOpenQuickAdd: () => void;
 }
 
 export function DashboardView({
@@ -65,10 +64,13 @@ export function DashboardView({
   investments,
   recurring,
   goals,
-  onOpenQuickAdd,
 }: DashboardViewProps) {
   const { success, error } = useToast();
   const [loadingSeed, setLoadingSeed] = useState(false);
+
+  const handleOpenQuickAdd = () => {
+    window.dispatchEvent(new CustomEvent("open-quick-add"));
+  };
 
   // Period state: current month by default
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -227,7 +229,7 @@ export function DashboardView({
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <button
-              onClick={onOpenQuickAdd}
+              onClick={handleOpenQuickAdd}
               className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-2 shadow-md shadow-emerald-600/20"
             >
               <Plus className="w-4 h-4" />

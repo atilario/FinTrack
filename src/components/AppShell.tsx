@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Navigation } from "./Navigation";
 import { QuickTransactionModal } from "./QuickTransactionModal";
 import { DevToolbar } from "./DevToolbar";
@@ -26,6 +26,12 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+
+  useEffect(() => {
+    const handleOpen = () => setQuickAddOpen(true);
+    window.addEventListener("open-quick-add", handleOpen);
+    return () => window.removeEventListener("open-quick-add", handleOpen);
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-slate-50 dark:bg-[#090D16] text-slate-900 dark:text-slate-100">

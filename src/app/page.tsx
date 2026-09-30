@@ -63,7 +63,6 @@ export default async function HomePage() {
         investments={userInvestments}
         recurring={userRecurring}
         goals={userGoals}
-        onOpenQuickAdd={() => {}}
       />
     </AppShell>
   );
