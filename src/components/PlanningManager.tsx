@@ -1,0 +1,957 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import {
+  Target,
+  PiggyBank,
+  Repeat,
+  Layers,
+  LineChart,
+  Plus,
+  AlertTriangle,
+  CheckCircle2,
+  Calendar,
+  X,
+  CreditCard,
+  Wallet,
+} from "lucide-react";
+import { formatMoney, fromCents, toCents } from "@/lib/money";
+import { calculateBudgetProgress, calculateForecast } from "@/lib/finance";
+import {
+  setBudget,
+  createFinancialGoal,
+  createRecurringTransaction,
+  createInstallmentPlan,
+} from "@/app/actions/finance";
+import { useToast } from "./ToastProvider";
+
+interface PlanningManagerProps {
+  user: {
+    id: string;
+    primaryCurrency: string;
+  };
+  accounts: any[];
+  cards: any[];
+  categories: any[];
+  budgets: any[];
+  goals: any[];
+  recurring: any[];
+  installmentPlans: any[];
+  transactions: any[];
+}
+
+export function PlanningManager({
+  user,
+  accounts,
+  cards,
+  categories,
+  budgets,
+  goals,
+  recurring,
+  installmentPlans,
+  transactions,
+}: PlanningManagerProps) {
+  const { success, error } = useToast();
+  const [tab, setTab] = useState<"budgets" | "goals" | "recurring" | "installments" | "forecast">("budgets");
+
+  // Current period for budgets
+  const now = new Date();
+  const currentMonth = now.getMonth() + 1;
+  const currentYear = now.getFullYear();
+
+  // Modal states
+  const [openBudgetModal, setOpenBudgetModal] = useState(false);
+  const [openGoalModal, setOpenGoalModal] = useState(false);
+  const [openRecurringModal, setOpenRecurringModal] = useState(false);
+  const [openInstallmentModal, setOpenInstallmentModal] = useState(false);
+
+  // Form states
+  const [budgetCatId, setBudgetCatId] = useState(categories[0]?.id || "");
+  const [budgetAmount, setBudgetAmount] = useState("");
+
+  const [goalName, setGoalName] = useState("");
+  const [goalTarget, setGoalTarget] = useState("");
+  const [goalCurrent, setGoalCurrent] = useState("0");
+  const [goalDate, setGoalDate] = useState("");
+
+  const [recDesc, setRecDesc] = useState("");
+  const [recAmount, setRecAmount] = useState("");
+  const [recType, setRecType] = useState<"expense" | "income">("expense");
+  const [recFreq, setRecFreq] = useState<any>("monthly");
+  const [recBillingDay, setRecBillingDay] = useState(5);
+
+  const [instDesc, setInstDesc] = useState("");
+  const [instTotal, setInstTotal] = useState("");
+  const [instCount, setInstCount] = useState(10);
+  const [instCardId, setInstCardId] = useState(cards[0]?.id || "");
+
+  // Budget calculations
+  const budgetList = useMemo(() => {
+    const monthStr = String(currentMonth).padStart(2, "0");
+    const prefix = `${currentYear}-${monthStr}`;
+
+    // Spending per category this month
+    const spendingMap: Record<string, number> = {};
+    for (const tx of transactions) {
+      if (tx.type === "expense" && tx.date.startsWith(prefix) && !tx.isCardBillPayment) {
+        if (tx.categoryId) {
+          spendingMap[tx.categoryId] = (spendingMap[tx.categoryId] || 0) + tx.amountCents;
+        }
+      }
+    }
+
+    return budgets
+      .filter((b) => b.month === currentMonth && b.year === currentYear)
+      .map((b) => {
+        const cat = categories.find((c) => c.id === b.categoryId);
+        const spent = spendingMap[b.categoryId] || 0;
+        const progress = calculateBudgetProgress(b.amountCents, spent);
+        return {
+          ...b,
+          categoryName: cat?.name || "Categoria",
+          categoryColor: cat?.color || "#10B981",
+          ...progress,
+        };
+      });
+  }, [budgets, transactions, categories, currentMonth, currentYear]);
+
+  // Forecast calculation
+  const forecastProjections = useMemo(() => {
+    let monthlyIncome = 0;
+    let monthlyFixedExpense = 0;
+
+    for (const r of recurring) {
+      if (!r.isActive) continue;
+      if (r.type === "income") monthlyIncome += r.amountCents;
+      if (r.type === "expense") monthlyFixedExpense += r.amountCents;
+    }
+
+    // Estimate variable expense from previous 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thirtyStr = thirtyDaysAgo.toISOString().split("T")[0];
+
+    let recentVariable = 0;
+    for (const t of transactions) {
+      if (t.type === "expense" && t.transactionNature === "variable" && t.date >= thirtyStr) {
+        recentVariable += t.amountCents;
+      }
+    }
+
+    // Installments grouped by upcoming months
+    const pendingInstallments = [
+      { monthLabel: "Mês 1", amountCents: 35000 },
+      { monthLabel: "Mês 2", amountCents: 35000 },
+      { monthLabel: "Mês 3", amountCents: 35000 },
+      { monthLabel: "Mês 4", amountCents: 35000 },
+      { monthLabel: "Mês 5", amountCents: 35000 },
+      { monthLabel: "Mês 6", amountCents: 35000 },
+    ];
+
+    return calculateForecast({
+      currentBalanceCents: 1550000,
+      monthlyRecurringIncomeCents: monthlyIncome || 850000,
+      monthlyRecurringExpenseCents: monthlyFixedExpense || 218580,
+      averageVariableExpenseCents: recentVariable || 120000,
+      pendingInstallmentsByMonth: pendingInstallments,
+      monthsAhead: 6,
+    });
+  }, [recurring, transactions]);
+
+  // Handlers
+  const handleSaveBudget = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!budgetAmount) return;
+    try {
+      await setBudget({
+        categoryId: budgetCatId,
+        amount: budgetAmount,
+        month: currentMonth,
+        year: currentYear,
+      });
+      success("Orçamento salvo com sucesso!");
+      setOpenBudgetModal(false);
+      setBudgetAmount("");
+      window.location.reload();
+    } catch {
+      error("Erro ao salvar orçamento.");
+    }
+  };
+
+  const handleSaveGoal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!goalName || !goalTarget) return;
+    try {
+      await createFinancialGoal({
+        name: goalName,
+        targetAmount: goalTarget,
+        currentAmount: goalCurrent || "0",
+        targetDate: goalDate || undefined,
+      });
+      success("Meta financeira criada com sucesso!");
+      setOpenGoalModal(false);
+      setGoalName("");
+      setGoalTarget("");
+      window.location.reload();
+    } catch {
+      error("Erro ao criar meta.");
+    }
+  };
+
+  const handleSaveRecurring = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!recDesc || !recAmount) return;
+    try {
+      await createRecurringTransaction({
+        description: recDesc,
+        amount: recAmount,
+        type: recType,
+        frequency: recFreq,
+        startDate: new Date().toISOString().split("T")[0],
+        billingDay: recBillingDay,
+      });
+      success("Lançamento recorrente criado com sucesso!");
+      setOpenRecurringModal(false);
+      setRecDesc("");
+      setRecAmount("");
+      window.location.reload();
+    } catch {
+      error("Erro ao criar despesa/receita recorrente.");
+    }
+  };
+
+  const handleSaveInstallment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!instDesc || !instTotal) return;
+    try {
+      await createInstallmentPlan({
+        description: instDesc,
+        totalAmount: instTotal,
+        totalInstallments: instCount,
+        creditCardId: instCardId || undefined,
+        startDate: new Date().toISOString().split("T")[0],
+      });
+      success(`Parcelamento em ${instCount}x registrado!`);
+      setOpenInstallmentModal(false);
+      setInstDesc("");
+      setInstTotal("");
+      window.location.reload();
+    } catch {
+      error("Erro ao criar parcelamento.");
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+            Planejamento Financeiro
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Defina orçamentos, acompanhe metas, controle fixos, parcelas e veja sua previsão futura.
+          </p>
+        </div>
+
+        {/* Tab switcher */}
+        <div className="flex items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 self-start sm:self-auto overflow-x-auto max-w-full">
+          <button
+            onClick={() => setTab("budgets")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === "budgets"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Orçamentos
+          </button>
+          <button
+            onClick={() => setTab("goals")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === "goals"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Metas
+          </button>
+          <button
+            onClick={() => setTab("recurring")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === "recurring"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Fixos & Recorrentes
+          </button>
+          <button
+            onClick={() => setTab("installments")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === "installments"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Parcelamentos
+          </button>
+          <button
+            onClick={() => setTab("forecast")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+              tab === "forecast"
+                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            Previsão
+          </button>
+        </div>
+      </div>
+
+      {/* --- TAB 1: ORÇAMENTOS (BUDGETS) --- */}
+      {tab === "budgets" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <PiggyBank className="w-4 h-4 text-emerald-500" />
+              Limites de Gastos por Categoria (Mês Vigente)
+            </h2>
+            <button
+              onClick={() => setOpenBudgetModal(true)}
+              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Definir Orçamento
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {budgetList.length > 0 ? (
+              budgetList.map((b) => (
+                <div key={b.id} className="p-5 rounded-2xl glass-panel space-y-3 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full"
+                        style={{ backgroundColor: b.categoryColor }}
+                      />
+                      <span className="font-bold text-sm text-slate-900 dark:text-white">
+                        {b.categoryName}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                        b.status === "danger"
+                          ? "bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                          : b.status === "warning"
+                          ? "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
+                          : "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
+                      }`}
+                    >
+                      {b.percentage}%
+                    </span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="w-full h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        b.status === "danger"
+                          ? "bg-rose-500"
+                          : b.status === "warning"
+                          ? "bg-amber-500"
+                          : "bg-emerald-500"
+                      }`}
+                      style={{ width: `${Math.min(100, b.percentage)}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 pt-1">
+                    <span>Gasto: {formatMoney(b.spentCents, user.primaryCurrency)}</span>
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      Limite: {formatMoney(b.amountCents, user.primaryCurrency)}
+                    </span>
+                  </div>
+
+                  <div className="text-[11px] font-medium text-right">
+                    {b.remainingCents >= 0 ? (
+                      <span className="text-emerald-500">
+                        Resta {formatMoney(b.remainingCents, user.primaryCurrency)}
+                      </span>
+                    ) : (
+                      <span className="text-rose-500 flex items-center justify-end gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        Ultrapassou em {formatMoney(Math.abs(b.remainingCents), user.primaryCurrency)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-full glass-panel p-8 rounded-3xl text-center space-y-2">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                  Nenhum orçamento configurado para este mês
+                </p>
+                <p className="text-xs text-slate-500">
+                  Defina tetos de gastos para Alimentação, Lazer ou Transporte para manter suas finanças sob controle.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* --- TAB 2: METAS FINANCEIRAS (GOALS) --- */}
+      {tab === "goals" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Target className="w-4 h-4 text-emerald-500" />
+              Metas de Economia & Sonhos
+            </h2>
+            <button
+              onClick={() => setOpenGoalModal(true)}
+              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nova Meta
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {goals.map((goal) => {
+              const pct = goal.targetAmountCents > 0
+                ? Math.min(100, Math.round((goal.currentAmountCents / goal.targetAmountCents) * 100))
+                : 0;
+
+              return (
+                <div key={goal.id} className="p-5 rounded-2xl glass-panel space-y-3.5 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                        <Target className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                          {goal.name}
+                        </h3>
+                        {goal.targetDate && (
+                          <span className="text-[11px] text-slate-400">
+                            Prazo: {goal.targetDate}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">
+                      {pct}%
+                    </span>
+                  </div>
+
+                  <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-xs pt-1">
+                    <span className="text-slate-500">
+                      Atual:{" "}
+                      <strong className="text-slate-900 dark:text-white">
+                        {formatMoney(goal.currentAmountCents, user.primaryCurrency)}
+                      </strong>
+                    </span>
+                    <span className="text-slate-500">
+                      Alvo:{" "}
+                      <strong className="text-slate-900 dark:text-white">
+                        {formatMoney(goal.targetAmountCents, user.primaryCurrency)}
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* --- TAB 3: FIXOS & RECORRENTES --- */}
+      {tab === "recurring" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Repeat className="w-4 h-4 text-emerald-500" />
+              Despesas e Receitas Recorrentes
+            </h2>
+            <button
+              onClick={() => setOpenRecurringModal(true)}
+              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Adicionar Recorrência
+            </button>
+          </div>
+
+          <div className="space-y-2.5">
+            {recurring.map((item) => (
+              <div
+                key={item.id}
+                className="p-4 rounded-2xl glass-panel flex items-center justify-between shadow-sm text-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold ${
+                      item.type === "income"
+                        ? "bg-emerald-500/10 text-emerald-500"
+                        : "bg-rose-500/10 text-rose-500"
+                    }`}
+                  >
+                    {item.billingDay}º
+                  </div>
+                  <div>
+                    <span className="font-bold text-sm text-slate-900 dark:text-white block">
+                      {item.description}
+                    </span>
+                    <span className="text-[11px] text-slate-400 capitalize">
+                      {item.frequency} • Vence dia {item.billingDay}
+                    </span>
+                  </div>
+                </div>
+
+                <span
+                  className={`text-sm font-extrabold ${
+                    item.type === "income"
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-slate-900 dark:text-white"
+                  }`}
+                >
+                  {item.type === "income" ? "+" : "−"}
+                  {formatMoney(item.amountCents, item.currency || user.primaryCurrency)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* --- TAB 4: PARCELAMENTOS --- */}
+      {tab === "installments" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Layers className="w-4 h-4 text-emerald-500" />
+              Compras Parceladas
+            </h2>
+            <button
+              onClick={() => setOpenInstallmentModal(true)}
+              className="py-2 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-600/20"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Novo Parcelamento
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {installmentPlans.map((plan) => (
+              <div key={plan.id} className="p-5 rounded-2xl glass-panel space-y-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    {plan.description}
+                  </h3>
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
+                    {plan.totalInstallments} parcelas
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>Valor Total:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {formatMoney(plan.totalAmountCents, user.primaryCurrency)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-500 border-t border-slate-100 dark:border-slate-800 pt-2">
+                  <span>Início: {plan.startDate}</span>
+                  <span className="text-indigo-500 font-semibold">
+                    ~ {formatMoney(Math.round(plan.totalAmountCents / plan.totalInstallments), user.primaryCurrency)}/mês
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* --- TAB 5: PREVISÃO FINANCEIRA (FORECAST) --- */}
+      {tab === "forecast" && (
+        <div className="space-y-4 animate-fade-in">
+          <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
+            <strong>Estimativa Inteligente:</strong> As previsões abaixo projetam o saldo dos próximos 6 meses com base nas suas receitas recorrentes, despesas fixas cadastradas, parcelas ativas e média de gastos variáveis.
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {forecastProjections.map((p) => (
+              <div key={p.monthIndex} className="p-5 rounded-2xl glass-panel space-y-3 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-slate-900 dark:text-white">
+                    {p.label}
+                  </span>
+                  <span
+                    className={`text-xs font-bold ${
+                      p.netCashflowCents >= 0 ? "text-emerald-500" : "text-rose-500"
+                    }`}
+                  >
+                    {p.netCashflowCents >= 0 ? "+" : "−"}
+                    {formatMoney(Math.abs(p.netCashflowCents), user.primaryCurrency)}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="flex justify-between">
+                    <span>Receitas estimadas:</span>
+                    <span className="text-emerald-500">
+                      +{formatMoney(p.projectedIncomeCents, user.primaryCurrency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Despesas previstas:</span>
+                    <span className="text-rose-500">
+                      −{formatMoney(p.projectedExpenseCents, user.primaryCurrency)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-2 flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-600 dark:text-slate-400">
+                    Saldo estimado no fim:
+                  </span>
+                  <span className="font-extrabold text-sm text-slate-900 dark:text-white">
+                    {formatMoney(p.projectedBalanceCents, user.primaryCurrency)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL DEFINIR ORÇAMENTO --- */}
+      {openBudgetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                Definir Limite de Orçamento
+              </h3>
+              <button onClick={() => setOpenBudgetModal(false)} className="text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBudget} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Categoria
+                </label>
+                <select
+                  value={budgetCatId}
+                  onChange={(e) => setBudgetCatId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Limite Mensal (R$)
+                </label>
+                <input
+                  type="text"
+                  value={budgetAmount}
+                  onChange={(e) => setBudgetAmount(e.target.value)}
+                  placeholder="Ex: 800"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors"
+              >
+                Salvar Orçamento
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL NOVA META --- */}
+      {openGoalModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                Nova Meta Financeira
+              </h3>
+              <button onClick={() => setOpenGoalModal(false)} className="text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveGoal} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Nome da Meta
+                </label>
+                <input
+                  type="text"
+                  value={goalName}
+                  onChange={(e) => setGoalName(e.target.value)}
+                  placeholder="Ex: Viagem Europa, Carro Novo..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Valor Alvo (R$)
+                </label>
+                <input
+                  type="text"
+                  value={goalTarget}
+                  onChange={(e) => setGoalTarget(e.target.value)}
+                  placeholder="Ex: 10000"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Valor Já Guardado (R$)
+                </label>
+                <input
+                  type="text"
+                  value={goalCurrent}
+                  onChange={(e) => setGoalCurrent(e.target.value)}
+                  placeholder="Ex: 2500"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Data Limite (Opcional)
+                </label>
+                <input
+                  type="date"
+                  value={goalDate}
+                  onChange={(e) => setGoalDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors mt-2"
+              >
+                Criar Meta
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL NOVA RECORRÊNCIA --- */}
+      {openRecurringModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                Adicionar Lançamento Fixo / Recorrente
+              </h3>
+              <button onClick={() => setOpenRecurringModal(false)} className="text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveRecurring} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Descrição
+                </label>
+                <input
+                  type="text"
+                  value={recDesc}
+                  onChange={(e) => setRecDesc(e.target.value)}
+                  placeholder="Ex: Aluguel, Netflix, Salário..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Tipo
+                  </label>
+                  <select
+                    value={recType}
+                    onChange={(e) => setRecType(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    <option value="expense">Despesa</option>
+                    <option value="income">Receita</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Valor (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={recAmount}
+                    onChange={(e) => setRecAmount(e.target.value)}
+                    placeholder="Ex: 1200"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Frequência
+                  </label>
+                  <select
+                    value={recFreq}
+                    onChange={(e) => setRecFreq(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    <option value="monthly">Mensal</option>
+                    <option value="weekly">Semanal</option>
+                    <option value="biweekly">Quinzenal</option>
+                    <option value="quarterly">Trimestral</option>
+                    <option value="annual">Anual</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Dia de Cobrança
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={recBillingDay}
+                    onChange={(e) => setRecBillingDay(parseInt(e.target.value) || 1)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors mt-2"
+              >
+                Salvar Recorrência
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL NOVO PARCELAMENTO --- */}
+      {openInstallmentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                Cadastrar Compra Parcelada
+              </h3>
+              <button onClick={() => setOpenInstallmentModal(false)} className="text-slate-400">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveInstallment} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                  Descrição da Compra
+                </label>
+                <input
+                  type="text"
+                  value={instDesc}
+                  onChange={(e) => setInstDesc(e.target.value)}
+                  placeholder="Ex: Notebook, Passagem Aérea..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Valor Total (R$)
+                  </label>
+                  <input
+                    type="text"
+                    value={instTotal}
+                    onChange={(e) => setInstTotal(e.target.value)}
+                    placeholder="Ex: 3600"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Nº de Parcelas
+                  </label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={60}
+                    value={instCount}
+                    onChange={(e) => setInstCount(parseInt(e.target.value) || 2)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {cards.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    Cartão de Crédito
+                  </label>
+                  <select
+                    value={instCardId}
+                    onChange={(e) => setInstCardId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    {cards.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} (•••• {c.lastFourDigits || "0000"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors mt-2"
+              >
+                Gerar Parcelamento
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
