@@ -44,15 +44,20 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                E-mail
+                Usuário FinTrack ou E-mail
               </label>
               <input
-                type="email"
+                type="text"
                 name="email"
                 required
-                placeholder="seu@email.com"
+                autoCapitalize="none"
+                autoCorrect="off"
+                placeholder="Ex: seu.nome ou seu.nome@fintrack.app"
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all"
               />
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Pode digitar apenas o seu usuário (o @fintrack.app é adicionado automaticamente).
+              </span>
             </div>
 
             <div>
@@ -92,7 +97,7 @@ export default function LoginPage() {
               href="/register"
               className="text-emerald-600 dark:text-emerald-400 font-semibold hover:underline"
             >
-              Cadastre-se gratuitamente
+              Criar acesso @fintrack.app
             </Link>
           </p>
         </div>

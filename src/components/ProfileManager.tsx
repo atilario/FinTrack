@@ -92,7 +92,7 @@ export function ProfileManager({ user, preferences }: ProfileManagerProps) {
           </div>
 
           <div>
-            <span className="text-slate-400 block mb-0.5">E-mail Cadastrado</span>
+            <span className="text-slate-400 block mb-0.5">Identificador FinTrack</span>
             <span className="font-semibold text-slate-900 dark:text-white text-sm">
               {user.email}
             </span>

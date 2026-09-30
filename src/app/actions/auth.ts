@@ -9,13 +9,25 @@ import { redirect } from "next/navigation";
 
 export async function registerUser(formData: FormData) {
   const name = formData.get("name")?.toString().trim();
-  const email = formData.get("email")?.toString().trim().toLowerCase();
+  let rawUsername = (formData.get("username") || formData.get("email"))?.toString().trim().toLowerCase() || "";
   const password = formData.get("password")?.toString();
   const currency = formData.get("currency")?.toString() || "BRL";
 
-  if (!name || !email || !password) {
+  if (!name || !rawUsername || !password) {
     return { error: "Por favor, preencha todos os campos obrigatórios." };
   }
+
+  // Strip any @... if user typed an email, and keep only clean characters
+  const cleanUsername = rawUsername
+    .replace(/@.*$/, "")
+    .replace(/[^a-z0-9._-]/g, "")
+    .replace(/^_+|_+$/g, "");
+
+  if (cleanUsername.length < 3) {
+    return { error: "O nome de usuário deve ter pelo menos 3 caracteres alfanuméricos." };
+  }
+
+  const email = `${cleanUsername}@fintrack.app`;
 
   if (password.length < 6) {
     return { error: "A senha deve ter pelo menos 6 caracteres." };
@@ -23,7 +35,7 @@ export async function registerUser(formData: FormData) {
 
   const existing = await db.select().from(users).where(eq(users.email, email)).get();
   if (existing) {
-    return { error: "Este e-mail já está cadastrado. Tente fazer login." };
+    return { error: `O usuário "${cleanUsername}" já está em uso. Por favor, escolha outro nome de usuário.` };
   }
 
   const userId = crypto.randomUUID();
@@ -66,16 +78,19 @@ export async function registerUser(formData: FormData) {
 }
 
 export async function loginUser(formData: FormData) {
-  const email = formData.get("email")?.toString().trim().toLowerCase();
+  let rawIdentifier = (formData.get("email") || formData.get("username"))?.toString().trim().toLowerCase() || "";
   const password = formData.get("password")?.toString();
 
-  if (!email || !password) {
-    return { error: "Informe seu e-mail e senha." };
+  if (!rawIdentifier || !password) {
+    return { error: "Informe seu usuário e senha." };
   }
+
+  // If user didn't type '@', automatically append '@fintrack.app'
+  const email = rawIdentifier.includes("@") ? rawIdentifier : `${rawIdentifier}@fintrack.app`;
 
   const user = await db.select().from(users).where(eq(users.email, email)).get();
   if (!user) {
-    return { error: "Credenciais inválidas. Verifique seu e-mail e senha." };
+    return { error: "Credenciais inválidas. Verifique seu usuário e senha." };
   }
 
   let valid = await verifyPassword(password, user.passwordHash);
@@ -86,7 +101,7 @@ export async function loginUser(formData: FormData) {
     valid = true;
   }
   if (!valid) {
-    return { error: "Credenciais inválidas. Verifique seu e-mail e senha." };
+    return { error: "Credenciais inválidas. Verifique seu usuário e senha." };
   }
 
   const token = await signSessionToken({

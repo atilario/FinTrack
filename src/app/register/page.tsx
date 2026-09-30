@@ -3,13 +3,20 @@
 import { useState } from "react";
 import { registerUser } from "@/app/actions/auth";
 import Link from "next/link";
-import { Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
+import { Sparkles, ArrowRight, ShieldCheck, Lock, AtSign } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 import { SUPPORTED_CURRENCIES } from "@/lib/money";
 
 export default function RegisterPage() {
   const { error } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  const [username, setUsername] = useState("");
+
+  const handleUsernameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Only allow lowercase letters, numbers, dot, underscore, hyphen
+    const val = e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+    setUsername(val);
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -36,7 +43,7 @@ export default function RegisterPage() {
             Criar Conta
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Comece a transformar seu controle financeiro hoje mesmo.
+            Privacidade total: não armazenamos e-mails pessoais de usuários.
           </p>
         </div>
 
@@ -45,33 +52,48 @@ export default function RegisterPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                Seu Nome Completo
+                Seu Nome Completo ou Apelido
               </label>
               <input
                 type="text"
                 name="name"
                 required
-                placeholder="Ex: Maria Oliveira"
+                placeholder="Ex: Átila Silva"
                 className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all"
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                E-mail
+                Escolha seu Usuário FinTrack
               </label>
-              <input
-                type="email"
-                name="email"
-                required
-                placeholder="seu@email.com"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all"
-              />
+              <div className="flex items-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all">
+                <input
+                  type="text"
+                  name="username"
+                  value={username}
+                  onChange={handleUsernameChange}
+                  required
+                  minLength={3}
+                  placeholder="seu.nome"
+                  className="w-full px-4 py-3 bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none"
+                />
+                <span className="px-3.5 py-3 bg-slate-100 dark:bg-slate-800 text-xs font-mono font-bold text-slate-500 dark:text-slate-400 select-none border-l border-slate-200 dark:border-slate-800">
+                  @fintrack.app
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                <Lock className="w-3 h-3 text-emerald-500" />
+                Seu acesso será padronizado como{" "}
+                <strong className="text-slate-700 dark:text-slate-300">
+                  {username ? `${username}@fintrack.app` : "nome@fintrack.app"}
+                </strong>
+              </p>
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
-                Senha (mínimo 6 caracteres)
+                Senha de Acesso (mínimo 6 caracteres)
               </label>
               <input
                 type="password"
@@ -109,7 +131,7 @@ export default function RegisterPage() {
                 <span className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
               ) : (
                 <>
-                  Cadastrar e Continuar
+                  Criar Conta e Continuar
                   <ArrowRight className="w-4 h-4" />
                 </>
               )}
@@ -129,7 +151,7 @@ export default function RegisterPage() {
 
         <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
           <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          <span>Seus dados ficam 100% seguros e isolados</span>
+          <span>Privacidade em 1º lugar: sem rastreamento nem coleta de dados pessoais</span>
         </div>
       </div>
     </div>
