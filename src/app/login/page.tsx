@@ -1,15 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { loginUser, loginDemoUser, loginDevUser } from "@/app/actions/auth";
+import { loginUser } from "@/app/actions/auth";
 import Link from "next/link";
-import { Sparkles, ArrowRight, ShieldCheck, Terminal } from "lucide-react";
+import { Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
 import { useToast } from "@/components/ToastProvider";
 
 export default function LoginPage() {
-  const { error, success } = useToast();
+  const { error } = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [demoLoading, setDemoLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -20,22 +19,6 @@ export default function LoginPage() {
       error(res.error);
       setSubmitting(false);
     } else if (res?.redirect) {
-      window.location.href = res.redirect;
-    }
-  };
-
-  const handleDemoLogin = async () => {
-    setDemoLoading(true);
-    const res = await loginDemoUser();
-    if (res?.redirect) {
-      window.location.href = res.redirect;
-    }
-  };
-
-  const handleDevLogin = async () => {
-    setDemoLoading(true);
-    const res = await loginDevUser();
-    if (res?.redirect) {
       window.location.href = res.redirect;
     }
   };
@@ -102,49 +85,6 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          {/* Divider */}
-          <div className="relative flex items-center justify-center">
-            <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
-            <span className="bg-white dark:bg-slate-900 px-3 text-xs text-slate-400 font-medium uppercase tracking-wider">
-              ou
-            </span>
-          </div>
-
-          {/* Demo & Dev 1-Click Login Buttons */}
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={handleDemoLogin}
-              disabled={demoLoading}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700/80 text-slate-800 dark:text-slate-200 font-semibold text-xs transition-colors flex items-center justify-center gap-2 border border-slate-200 dark:border-slate-700"
-            >
-              {demoLoading ? (
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-slate-600 border-t-transparent" />
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-emerald-500" />
-                  Acessar com Dados de Demonstração (1 Clique)
-                </>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleDevLogin}
-              disabled={demoLoading}
-              className="w-full py-2.5 px-4 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-400 font-semibold text-xs transition-colors flex items-center justify-center gap-2 border border-emerald-500/30 font-mono"
-            >
-              {demoLoading ? (
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-emerald-400 border-t-transparent" />
-              ) : (
-                <>
-                  <Terminal className="w-4 h-4 text-emerald-400" />
-                  Entrar como Perfil Dev (Ambiente de Testes)
-                </>
-              )}
-            </button>
-          </div>
 
           <p className="text-center text-xs text-slate-500">
             Não tem uma conta?{" "}
